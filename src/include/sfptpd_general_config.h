@@ -33,7 +33,7 @@
 #define SFPTPD_DEFAULT_CLUSTERING_GUARD_THRESHOLD  1
 #define SFPTPD_DEFAULT_PERSISTENT_CLOCK_CORRECTION (true)
 #define SFPTPD_DEFAULT_DISCIPLINE_ALL_CLOCKS       (true)
-#define SFPTPD_DEFAULT_NON_SFC_NICS                (false)
+#define SFPTPD_DEFAULT_NON_SFC_NICS                (true)
 #define SFPTPD_DEFAULT_ASSUME_ONE_PHC_PER_NIC      (true)
 #define SFPTPD_DEFAULT_TEST_MODE                   (false)
 #define SFPTPD_DEFAULT_RTC_ADJUST                  (true)
