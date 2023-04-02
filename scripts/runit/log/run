@@ -1,0 +1,10 @@
+#!/bin/sh
+# SPDX-License-Identifier: BSD-3-Clause
+# (c) Copyright 2023 Advanced Micro Devices, Inc.
+
+logdir=/var/log/runit/sfptpd
+
+mkdir -m 750 -p "$logdir"
+chown _runit-log:adm "$logdir"
+chmod 750 "$logdir"
+exec chpst -u _runit-log svlogd "$logdir"
