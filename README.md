@@ -41,6 +41,13 @@ Some example installation recipes follow.
 ### For distributions with sysv init, e.g. RHEL6
 ``` sudo make prefix=/usr INST_INITS=sysv install ```
 
+### Installing on Devuan
+```
+sudo make PREFIX=/usr INST_INITS=sysv install
+sudo adduser --system --home /var/lib/sfptpd --group sfptpd
+sudo install -m 644 -p -t /lib/udev/rules.d scripts/udev/55-sfptpd.rules
+```
+
 ### Default operation
 Installs to /usr/local
 
