@@ -217,7 +217,7 @@ static const sfptpd_config_option_t config_general_options[] =
 	{"assume_one_phc_per_nic", "<off | on>",
 		"Specify whether multiple reported clock devices on a NIC "
 		"should be assumed to represent the same underlying clock. "
-		"Enabled by default",
+		"Disabled by default",
 		1, SFPTPD_CONFIG_SCOPE_GLOBAL, false,
 		parse_assume_one_phc_per_nic},
 	{"avoid_efx_ioctl", "<off | on>",
