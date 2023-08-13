@@ -206,18 +206,18 @@ static const sfptpd_config_option_t config_general_options[] =
 		parse_persistent_clock_correction},
 	{"non_solarflare_nics", "<off | on>",
 		"Specify whether to use timestamping and hardware clock "
-		"capabilities of non-Solarflare adapters. Disabled by default",
+		"capabilities of non-Solarflare adapters. Enabled by default",
 		1, SFPTPD_CONFIG_SCOPE_GLOBAL, true,
 		parse_non_solarflare_nics},
 	{"non_xilinx_nics", "<off | on>",
 		"Specify whether to use timestamping and hardware clock "
-		"capabilities of non-Xilinx adapters. Disabled by default",
+		"capabilities of non-Xilinx adapters. Enabled by default",
 		1, SFPTPD_CONFIG_SCOPE_GLOBAL, false,
 		parse_non_solarflare_nics},
 	{"assume_one_phc_per_nic", "<off | on>",
 		"Specify whether multiple reported clock devices on a NIC "
 		"should be assumed to represent the same underlying clock. "
-		"Enabled by default",
+		"Disabled by default",
 		1, SFPTPD_CONFIG_SCOPE_GLOBAL, false,
 		parse_assume_one_phc_per_nic},
 	{"avoid_efx_ioctl", "<off | on>",
