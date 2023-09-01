@@ -43,6 +43,7 @@
 #include "sfptpd_crny_module.h"
 #include "sfptpd_netlink.h"
 #include "sfptpd_multicast.h"
+#include "sfptpd_clockfeed.h"
 
 
 /****************************************************************************
@@ -198,6 +199,10 @@ struct sfptpd_engine {
 
 	/* Engine thread */
 	struct sfptpd_thread *thread;
+
+	/* Clock feed service */
+	struct sfptpd_clockfeed *clockfeed;
+	struct sfptpd_thread *clockfeed_thread;
 
 	/* Leap second data */
 	struct {
@@ -2190,6 +2195,11 @@ static void engine_on_shutdown(void *context)
 	}
 	destroy_servos(engine);
 
+	if (engine->clockfeed_thread != NULL) {
+		sfptpd_thread_destroy(engine->clockfeed_thread);
+		engine->clockfeed_thread = NULL;
+	}
+
 	/* Ownership of netlink state reverts to main */
 }
 
@@ -2283,6 +2293,24 @@ static int engine_on_startup(void *context)
 	if (rc != 0) {
 		CRITICAL("could not start netlink polling\n");
 		goto fail;
+	}
+
+	engine->clockfeed = sfptpd_clockfeed_create(&engine->clockfeed_thread);
+	if (rc != 0) {
+		CRITICAL("could not start clock feed\n");
+		goto fail;
+	}
+
+	/* Register clocks with clock feed */
+	{
+		struct sfptpd_clock *clock;
+
+		for (clock = sfptpd_clock_first_active();
+		     clock;
+		     clock = sfptpd_clock_next_active(clock)) {
+			if (clock != sfptpd_clock_get_system_clock())
+				sfptpd_clockfeed_add_clock(engine->clockfeed, clock, -4);
+		}
 	}
 
 	/* Count potential sync instances, create storage for them and
