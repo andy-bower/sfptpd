@@ -2377,4 +2377,9 @@ bool sfptpd_clock_is_system(const struct sfptpd_clock *clock)
 	return is_system_clock(clock);
 }
 
+bool sfptpd_clock_is_active(const struct sfptpd_clock *clock)
+{
+	return clock && !clock->deleted;
+}
+
 /* fin */
