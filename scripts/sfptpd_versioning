@@ -62,6 +62,7 @@ derive_version () {
 
   if grep -q '$Format:' $1
   then
+    echo .. getting metadata from git clone >&2
     if ! { vcs_date=$(git log -1 --pretty=format:%cs) && \
            vcs_id=$(git log -1 --pretty=format:%h); }
     then
@@ -71,10 +72,17 @@ derive_version () {
     fi
     vcs_tag=$(git describe --tags)
   else
+    echo .. getting metadata from git archive substitutions >&2
     vcs_tag=$(field vcs-tag < $1)
     vcs_date=$(field vcs-date < $1)
     vcs_id=$(field vcs-id < $1)
   fi
+
+  echo .. vcs_tag="$vcs_tag" >&2
+  echo .. vcs_date="$vcs_date" >&2
+  echo .. vcs_id="$vcs_id" >&2
+  echo .. base_version="$base_version" >&2
+  echo .. src_version="$src_version" >&2
 
   if [ "v$src_version" = "$vcs_tag" ]
   then

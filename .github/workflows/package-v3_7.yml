@@ -1,0 +1,55 @@
+name: RPM builder
+
+on:
+  push:
+    branches:
+    - v3_7
+
+jobs:
+  rpmbuild:
+    runs-on: ubuntu-latest
+    steps:
+    - name: checkout sfptpd
+      uses: actions/checkout@v4
+      with:
+        path: source
+        fetch-depth: 0
+        fetch-tags: true
+    - name: checkout universal spec
+      uses: actions/checkout@v4
+      with:
+        repository: Xilinx-CNS/sfptpd-rpm
+        path: spec/rpm
+        ref: v3_7/universal
+    - name: prepare for universal rpm build
+      run: |
+        mkdir -p rpmbuild/{SOURCES,SPECS}
+        cd source
+        ver="$(scripts/sfptpd_versioning derive)"
+        git archive --prefix="sfptpd-$ver/" --format=tgz -o ../rpmbuild/SOURCES/sfptpd-$ver.tgz HEAD
+        cd ..
+        cp -a spec/rpm/* rpmbuild/SOURCES
+        mv rpmbuild/SOURCES/sfptpd.spec rpmbuild/SPECS
+        sed -i "s/^\(Version: \).*/\1 ${ver}/g" rpmbuild/SPECS/sfptpd.spec
+        tree rpmbuild
+    - name: build universal srpm
+      run: |
+        docker run --volume ${{ github.workspace }}/rpmbuild:/rpmbuild quay.io/ajb85/rpmbuilder:latest -bs /rpmbuild/SPECS/sfptpd.spec
+        tree rpmbuild
+        echo "srpms=$(find rpmbuild/SRPMS -type f -regex '.*\.src.rpm' -printf /%p' ')" > "$GITHUB_ENV"
+    - name: publish srpms
+      uses: actions/upload-artifact@v3
+      with:
+        name: SRPMs
+        path: rpmbuild/SRPMS/
+    - name: build universal rpm
+      run: |
+        docker run --volume ${{ github.workspace }}/rpmbuild:/rpmbuild quay.io/ajb85/rpmbuilder:latest --rebuild $srpms
+        echo "rpms=$(find rpmbuild/RPMS -type f -regex '.*\.rpm' -printf %p' ')" > "$GITHUB_ENV"
+    - name: check rpms
+      run: ls -l $rpms
+    - name: publish rpms
+      uses: actions/upload-artifact@v3
+      with:
+        name: RPMs
+        path: rpmbuild/RPMS/
