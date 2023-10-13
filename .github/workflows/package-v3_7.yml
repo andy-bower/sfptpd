@@ -6,6 +6,30 @@ on:
     - v3_7
 
 jobs:
+  tgzbuild:
+    runs-on: ubuntu-20.04
+    steps:
+    - name: checkout sfptpd
+      uses: actions/checkout@v4
+      with:
+        path: source
+        fetch-depth: 0
+        fetch-tags: true
+    - name: build tgz
+      run: |
+        cd source
+        ver="$(scripts/sfptpd_versioning derive)"
+        scripts/sfptpd_versioning write "$ver"
+        pkg="sfptpd-$ver.$(uname -m)"
+        DESTDIR=../$pkg make install
+        cd ..
+        tar cvzf $pkg.tar.gz $pkggithu
+    - name: publish tgz
+      uses: actions/upload-artifact@v3
+      with:
+        name: TGZs
+        path: *.tar.gz
+        
   rpmbuild:
     runs-on: ubuntu-latest
     steps:
