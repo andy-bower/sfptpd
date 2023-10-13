@@ -17,7 +17,7 @@ jobs:
         fetch-tags: true
     - name: build tgz
       run: |
-        apt-get install gcc make libmnl-dev libcap-dev
+        sudo apt-get install -y gcc make libmnl-dev libcap-dev
         mkdir output
         cd source
         ver="$(scripts/sfptpd_versioning derive)"
