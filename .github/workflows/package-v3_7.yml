@@ -17,18 +17,19 @@ jobs:
         fetch-tags: true
     - name: build tgz
       run: |
+        mkdir output
         cd source
         ver="$(scripts/sfptpd_versioning derive)"
         scripts/sfptpd_versioning write "$ver"
         pkg="sfptpd-$ver.$(uname -m)"
         DESTDIR=../$pkg make install
         cd ..
-        tar cvzf $pkg.tar.gz $pkggithu
+        tar cvzf output/$pkg.tar.gz $pkg
     - name: publish tgz
       uses: actions/upload-artifact@v3
       with:
         name: TGZs
-        path: *.tar.gz
+        path: output/
         
   rpmbuild:
     runs-on: ubuntu-latest
