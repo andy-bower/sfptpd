@@ -1,0 +1,3 @@
+shlibs:Depends=libc6 (>= 2.34), libcap2 (>= 1:2.10), libmnl0 (>= 1.0.3-4~)
+misc:Depends=
+misc:Pre-Depends=

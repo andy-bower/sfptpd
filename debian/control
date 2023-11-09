@@ -1,0 +1,20 @@
+Source: sfptpd
+Section: net
+Priority: optional
+Maintainer: Andrew Bower <andrew@bower.uk>
+Build-Depends: debhelper-compat (= 13)
+Standards-Version: 4.6.0
+Homepage: https://github.com/Xilinx-CNS/sfptpd
+Rules-Requires-Root: no
+
+Package: sfptpd
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, python3
+Description: System time sync daemon supporting PTP, NTP and 1PPS
+ sfptpd provides a system-level solution to time synchronization
+ between local (system and network interface) clocks and remote
+ (PTP, PPS and NTP) time sources and sinks. The daemon implements
+ the 2019 edition of the IEEE 1588 Precision Time Protocol over UDP
+ with the default or draft enterprise profile. Key features are
+ high quality timestamp filtering, bond & VLAN support and
+ instantaneous & long term monitoring.

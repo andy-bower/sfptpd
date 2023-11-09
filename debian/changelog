@@ -1,0 +1,5 @@
+sfptpd (3.7.0.1006~20231010.g5e971ae9-1) UNRELEASED; urgency=medium
+
+  * Initial release
+
+ -- Andrew Bower <andrew@bower.uk>  Tue, 10 Oct 2023 21:35:00 +0100
