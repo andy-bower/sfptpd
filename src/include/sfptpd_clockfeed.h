@@ -86,4 +86,4 @@ void sfptpd_clockfeed_stats_end_period(struct sfptpd_clockfeed *module,
 #define SFPTPD_CLOCKFEED_MSG_SYNC_EVENT   SFPTPD_CLOCKFEED_MSG(5)
 
 
-#endif
+#endif /* _SFPTPD_CLOCKFEED_MODULE_H */
