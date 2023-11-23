@@ -74,10 +74,21 @@ enum clockfeed_stats_ids {
 	CLOCKFEED_STATS_ID_NUM_CLOCKS,
 };
 
+/* Subscription stats ids */
+enum clockfeed_sub_stats_ids {
+	CLOCKFEED_STATS_SUB_ID_STALE_SAMPLES,
+};
+
 static const struct sfptpd_stats_collection_defn clockfeed_stats_defns[] =
 {
 	{CLOCKFEED_STATS_ID_NUM_CLOCKS, SFPTPD_STATS_TYPE_RANGE, "num-clocks", NULL, 0},
 };
+
+static const struct sfptpd_stats_collection_defn clockfeed_sub_stats_defns[] =
+{
+	{CLOCKFEED_STATS_SUB_ID_STALE_SAMPLES, SFPTPD_STATS_TYPE_RANGE, "stale-samples", NULL, 0},
+};
+#define NUM_SUB_STATS (sizeof clockfeed_sub_stats_defns)/(sizeof *clockfeed_sub_stats_defns)
 
 /****************************************************************************
  * Clock feed messages
@@ -185,6 +196,12 @@ struct sfptpd_clockfeed_sub {
 	/* Maximum age difference of samples */
 	struct timespec max_age_diff;
 
+	/* Base index of stats */
+	int stats_base;
+
+	/* Stats strings */
+	char *stats_strings[NUM_SUB_STATS];
+
 	/* Linked list of subscribers to source */
 	struct sfptpd_clockfeed_sub *next;
 };
@@ -237,6 +254,9 @@ struct sfptpd_clockfeed {
 
 	/* Clock feed statistics */
 	struct sfptpd_stats_collection stats;
+
+	/* Next stats id */
+	int next_stats_id;
 };
 
 
@@ -527,6 +547,43 @@ static void clockfeed_on_remove_clock(struct sfptpd_clockfeed *module,
 	SFPTPD_MSG_REPLY(msg);
 }
 
+static void clockfeed_create_sub_stats(struct sfptpd_clockfeed *module,
+				       struct sfptpd_clockfeed_sub *subscriber)
+{
+	const struct sfptpd_stats_collection_defn *definitions = clockfeed_sub_stats_defns;
+	int rc = 0;
+	int i;
+
+	subscriber->stats_base = module->next_stats_id;
+	module->next_stats_id += NUM_SUB_STATS;
+
+	for (i = 0; (i < NUM_SUB_STATS) && (rc == 0); i++, definitions++) {
+		assert(definitions->id == i);
+		rc = sfptpd_stats_collection_add(&module->stats,
+						 definitions->id + subscriber->stats_base,
+						 definitions->type,
+						 definitions->name,
+						 definitions->units,
+						 definitions->decimal_places);
+	}
+}
+
+static void clockfeed_destroy_sub_stats(struct sfptpd_clockfeed *module,
+				        struct sfptpd_clockfeed_sub *subscriber)
+{
+	int i;
+
+	for (i = 0; (i < NUM_SUB_STATS) && (rc == 0); i++, definitions++) {
+		assert(definitions->id == i);
+		rc = sfptpd_stats_collection_add(&module->stats,
+						 definitions->id + subscriber->stats_base,
+						 definitions->type,
+						 definitions->name,
+						 definitions->units,
+						 definitions->decimal_places);
+	}
+}
+
 static void clockfeed_on_subscribe(struct sfptpd_clockfeed *module,
 				   struct clockfeed_msg *msg)
 {
@@ -567,6 +624,8 @@ static void clockfeed_on_subscribe(struct sfptpd_clockfeed *module,
 		subscriber->min_counter = -1;
 		subscriber->next = source->subscribers;
 		source->subscribers = subscriber;
+	
+		clockfeed_create_sub_stats(module, subscriber);
 
 		msg->u.subscribe_resp.sub = subscriber;
 	}
@@ -599,6 +658,7 @@ static void clockfeed_on_unsubscribe(struct sfptpd_clockfeed *module,
 		*nextp = s->next;
 	}
 
+	clockfeed_destroy_sub_stats(module, sub);
 	clockfeed_reap_zombies(module, sub->source);
 	sub->magic = CLOCKFEED_DELETED_MAGIC;
 	free(sub);
@@ -759,8 +819,9 @@ struct sfptpd_clockfeed *sfptpd_clockfeed_create(struct sfptpd_thread **threadre
 	clockfeed->poll_period_log2 = min_poll_period_log2;
 
 	/* Create the statistics collection */
+	clockfeed->next_stats_id = sizeof(clockfeed_stats_defns)/sizeof(clockfeed_stats_defns[0]);
 	rc = sfptpd_stats_collection_create(&clockfeed->stats, "clockfeed",
-					    sizeof(clockfeed_stats_defns)/sizeof(clockfeed_stats_defns[0]),
+					    clockfeed->next_stats_id,
 					    clockfeed_stats_defns);
 	if (rc != 0) {
 		errno = rc;
