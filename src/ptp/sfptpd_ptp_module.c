@@ -1634,7 +1634,7 @@ int ptp_determine_timestamp_type(ptpd_timestamp_type_e *timestamp_type,
 	struct sfptpd_ptp_instance *instance;
 	bool must_be_hw = false;
 	bool must_be_sw = false;
-	const char *hw_instance = "(no-instnace)";
+	const char *hw_instance = "(no-instance)";
 	const char *sw_instance = "(no-instance)";
 
 	assert(logical_intf != NULL);
