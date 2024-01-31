@@ -1369,8 +1369,9 @@ netInitTimestamping(PtpInterface *ptpInterface, InterfaceOpts *ifOpts)
 	}
 	ts_caps = sfptpd_interface_ptp_caps(ptpInterface->interface);
 
-	if (ifOpts->timestampType == PTPD_TIMESTAMP_TYPE_SW &&
-	    ts_caps & SFPTPD_INTERFACE_TS_CAPS_SW) {
+	if ((ifOpts->timestampType == PTPD_TIMESTAMP_TYPE_SW ||
+	     (ts_caps & SFPTPD_INTERFACE_TS_CAPS_HW) == 0) &&
+	    (ts_caps & SFPTPD_INTERFACE_TS_CAPS_SW)) {
 
 		/* SWPTP-145: on supporting kernels, SO_TIMESTAMPING enablement
 		 * for software transmit timestamping succeeds regardless of
@@ -1396,7 +1397,8 @@ netInitTimestamping(PtpInterface *ptpInterface, InterfaceOpts *ifOpts)
 		}
 	}
 
-	if (ifOpts->timestampType == PTPD_TIMESTAMP_TYPE_SW) {
+	if (ifOpts->timestampType == PTPD_TIMESTAMP_TYPE_SW ||
+	    (ts_caps & SFPTPD_INTERFACE_TS_CAPS_HW) == 0) {
 
 		/* Try SO_TIMESTAMPNS software timestamps */
 		DBG("trying SO_TIMESTAMPNS software timestamping...\n");
