@@ -1142,13 +1142,13 @@ processPortMessage(RunTimeOpts *rtOpts, PtpClock *ptpClock,
 						 &user,
 						 ptpInterface->msgIbuf, length);
 		processTxTimestamp(ptpInterface, user, ticket, *timestamp);
+
+		/* Looped-back packets need no further processing */
+		return;
 	}
 
-	/*
-	 * subtract the inbound latency adjustment if it is not a loop
-	 *  back and the time stamp seems reasonable
-	 */
-	if (!isFromSelf && timestampValid && timestamp->sec > 0)
+	/* subtract the inbound latency adjustment */
+	if (timestampValid && timestamp->sec > 0)
 		sfptpd_time_subtract(timestamp, timestamp, &rtOpts->inboundLatency);
 
 	unpack_result = unpackPortMessage(ptpClock,
