@@ -1,5 +1,5 @@
 /*-
- * Copyright (c) 2023      Advanced Micro Devices, Inc.
+ * Copyright (c) 2023-2024 Advanced Micro Devices, Inc.
  * Copyright (c) 2019      Xilinx, Inc.
  * Copyright (c) 2014-2018 Solarflare Communications Inc.
  * Copyright (c) 2013      Harlan Stenn,
@@ -70,6 +70,8 @@
 #include <onload/extensions.h>
 #endif
 
+#include "sfptpd_time.h"
+
 /* SO_EE_ORIGIN_TIMESTAMPING is defined in linux/errqueue.h in recent kernels.
  * Define it for compilation with older kernels.
  */
@@ -90,8 +92,22 @@
 /* SO_TIMESTAMPING is defined in asm/socket.h in recent kernels.
  * Define it for compilation with older kernels.
  */
-#ifndef SO_TIMESTAMPING
-#define SO_TIMESTAMPING  37
+#ifndef SO_TIMESTAMPING_OLD
+#define SO_TIMESTAMPING_OLD  37
+#endif
+#ifndef SO_TIMESTAMPING_NEW
+#ifdef HAVE_TIME_TYPES
+struct scm_timestamping64 {
+        struct __kernel_timespec ts[3];
+};
+#endif
+#define SO_TIMESTAMPING_NEW  65
+#endif
+#ifndef SCM_TIMESTAMPING_OLD
+#define SCM_TIMESTAMPING_OLD SO_TIMESTAMPING_OLD
+#endif
+#ifndef SCM_TIMESTAMPING_NEW
+#define SCM_TIMESTAMPING_NEW SO_TIMESTAMPING_NEW
 #endif
 
 /* SCM_TIMESTAMPING_PKTINFO was introduced in Linux 4.13.
@@ -935,12 +951,15 @@ static void reset_timestamp(struct sfptpd_ts_info *info)
 static int parse_timestamp(uint8_t *pdu, size_t pdu_len,
 			   enum ptpd_ts_fmt ts_fmt,
 			   struct sfptpd_ts_info *info,
-			   bool tx)
+			   bool tx, int scm_type)
 {
 	const char *type = ts_fmt == PTPD_TS_ONLOAD_EXT ? "onload extension timestamp" : "so_timestamping";
 	union {
 		void *ptr;
-		struct timespec *lnx;
+		struct scm_timestamping *lnx;
+#ifdef HAVE_TIME_TYPES
+		struct scm_timestamping64 *lnx64;
+#endif
 #ifdef HAVE_ONLOAD_EXT
 		struct onload_timestamp *onload;
 #endif
@@ -952,7 +971,7 @@ static int parse_timestamp(uint8_t *pdu, size_t pdu_len,
 #ifdef HAVE_ONLOAD_EXT
 	    (ts_fmt == PTPD_TS_ONLOAD_EXT && pdu_len < CMSG_LEN(sizeof(*ts.onload) * 1)) ||
 #endif
-	    (ts_fmt == PTPD_TS_LINUX && pdu_len < CMSG_LEN(sizeof(*ts.lnx) * 3))) {
+	    (ts_fmt == PTPD_TS_LINUX && pdu_len < CMSG_LEN(sizeof(*ts.lnx)))) {
 		ERROR("received short %s (%zu)\n", type, pdu_len);
 		memset(info, '\0', sizeof *info);
 		return ENOTIMESTAMP;
@@ -974,9 +993,16 @@ static int parse_timestamp(uint8_t *pdu, size_t pdu_len,
 		sfptpd_time_zero(&info->sw);
 		info->have_sw = false;
 #endif
+#ifdef HAVE_TIME_TYPES
+	} else if (scm_type == SCM_TIMESTAMPING_NEW) {
+		sfptpd_time_from_kernel_floor(&info->sw, &ts.lnx64->ts[0]);
+		sfptpd_time_from_kernel_floor(&info->hw, &ts.lnx64->ts[2]);
+		info->have_sw = info->sw.sec != 0;
+		info->have_hw = info->hw.sec != 0;
+#endif
 	} else {
-		sfptpd_time_from_std_floor(&info->sw, &ts.lnx[0]);
-		sfptpd_time_from_std_floor(&info->hw, &ts.lnx[2]);
+		sfptpd_time_from_std_floor(&info->sw, &ts.lnx->ts[0]);
+		sfptpd_time_from_std_floor(&info->hw, &ts.lnx->ts[2]);
 		info->have_sw = info->sw.sec != 0;
 		info->have_hw = info->hw.sec != 0;
 	}
@@ -995,29 +1021,81 @@ static int parse_timestamp(uint8_t *pdu, size_t pdu_len,
 	return info->have_sw || info->have_hw ? 0 : ENOTIMESTAMP;
 }
 
+struct sfptpd_ts_ticket netMatchPacketToTsCache(struct sfptpd_ts_cache *ts_cache,
+						struct sfptpd_ts_user *user,
+						const char *data, size_t length)
+{
+	struct sfptpd_timespec now, elapsed;
+	struct sfptpd_ts_pkt *pkt;
+	int quantile;
+
+	assert(ts_cache);
+	assert(data);
+
+	sfclock_gettime(CLOCK_MONOTONIC, &now);
+
+	TS_CACHE_FOREACH(ts_cache, slot) {
+		pkt = &ts_cache->packet[slot];
+
+		/* Skip where packet too short to match */
+		if (length < pkt->match.pdu.len + pkt->match.pdu.trailer)
+			continue;
+
+		DBGV("Checking PDU slot %d\n", slot);
+		DUMP("PDU to match",
+		     pkt->match.pdu.data, pkt->match.pdu.len);
+
+		if (memcmp(pkt->match.pdu.data,
+			   data +
+			   length -
+			   pkt->match.pdu.len -
+			   pkt->match.pdu.trailer,
+			   pkt->match.pdu.len) == 0) {
+
+			/* Record the match details for user */
+			if (user)
+				*user = pkt->user;
+
+			/* Remove from cache */
+			ts_cache->free_bitmap |= (1 << ts_cache_bit(slot));
+
+			/* Record time take to get the result */
+			sfptpd_time_subtract(&elapsed, &now, &pkt->sent_monotime);
+			for (quantile = 0; quantile < TS_QUANTILES; quantile++) {
+				if (!sfptpd_time_is_greater_or_equal(&elapsed, &ts_cache->stats_periodic.quantile_bounds[quantile])) {
+					ts_cache->stats_periodic.resolved_quantile[quantile]++;
+					ts_cache->stats_adhoc.resolved_quantile[quantile]++;
+					break;
+				}
+			}
+			DBGV("Tx timestamp took " SFPTPD_FMT_SFTIMESPEC "s to acquire\n",
+			     SFPTPD_ARGS_SFTIMESPEC(elapsed));
+
+			/* Return ticket for match to user */
+			return (struct sfptpd_ts_ticket) { .slot = slot, .seq = pkt->seq };
+		}
+	}
+
+	return TS_NULL_TICKET;
+}
+
 bool netProcessError(PtpInterface *ptpInterface,
 		     size_t length,
 		     struct sfptpd_ts_user *user,
 		     struct sfptpd_ts_ticket *ticket,
 		     struct sfptpd_ts_info *info)
 {
-	struct sfptpd_timespec now, elapsed;
 	int ipproto = ptpInterface->ifOpts.transportAF == AF_INET6 ? IPPROTO_IPV6 : IPPROTO_IP;
 	int iptype = ipproto == IPPROTO_IPV6 ? IPV6_RECVERR : IP_RECVERR;
-	Boolean haveTs = FALSE, havePkt = FALSE, matchedPkt = FALSE;
+	Boolean haveTs = FALSE, havePkt = FALSE;
 	struct msghdr *msg = &ptpInterface->msgEbuf;
 	struct cmsghdr *cmsg;
 	struct sock_extended_err *err;
-	struct sfptpd_ts_pkt *pkt;
-
-	/* Appease impossible -Werror=maybe-unitialised reports */
-	pkt = NULL;
 
 	assert(user);
 	assert(ticket);
 	assert(info);
 
-	(void)sfclock_gettime(CLOCK_MONOTONIC, &now);
 	reset_timestamp(info);
 
 	if (length != 0) {
@@ -1043,10 +1121,11 @@ bool netProcessError(PtpInterface *ptpInterface,
 		DUMP("cmsg (header)", cmsg, len);
 
 		if ((SOL_SOCKET == level) &&
-		    (SO_TIMESTAMPING == type)) {
+		    (SO_TIMESTAMPING_OLD == type ||
+		     SO_TIMESTAMPING_NEW == type)) {
 			haveTs = parse_timestamp(CMSG_DATA(cmsg), len,
 						 ptpInterface->ts_fmt,
-						 info, true) == 0;
+						 info, true, type) == 0;
 		} else if ((ipproto == level) &&
 			   (iptype == type)) {
 			err = (struct sock_extended_err *)CMSG_DATA(cmsg);
@@ -1077,75 +1156,29 @@ bool netProcessError(PtpInterface *ptpInterface,
 	if (!havePkt)
 		goto finish;
 
-	TS_CACHE_FOREACH(&ptpInterface->ts_cache, slot) {
-		pkt = &ptpInterface->ts_cache.packet[slot];
+	*ticket = netMatchPacketToTsCache(&ptpInterface->ts_cache,
+					  user,
+					  msg->msg_iov[0].iov_base,
+					  length);
 
-		if (length < pkt->match.pdu.len + pkt->match.pdu.trailer) {
-			/* Too short to match this packet */
-			continue;
+	if (sfptpd_ts_is_ticket_valid(*ticket)) {
+		if (!haveTs) {
+			WARNING("received looped back transmit "
+				"packet but no timestamp\n");
 		}
-
-		/* We have a suitable message */
-		DBGV("Checking PDU slot %d\n", slot);
-		DUMP("PDU to match",
-		     pkt->match.pdu.data, pkt->match.pdu.len);
-
-		if (memcmp(pkt->match.pdu.data,
-			   msg->msg_iov[0].iov_base +
-			   length -
-			   pkt->match.pdu.len -
-			   pkt->match.pdu.trailer,
-			   pkt->match.pdu.len) == 0) {
-
-				/* Record the match */
-				matchedPkt = TRUE;
-				ticket->slot = slot;
-				ticket->seq = pkt->seq;
-				*user = pkt->user;
-
-				/* Remove from cache if matching */
-				ptpInterface->ts_cache.free_bitmap |= (1 << ts_cache_bit(slot));
-
-				break;
+	} else {
+		if (havePkt) {
+			WARNING("unexpected pkt received on "
+				"socket error queue. Expected one of:\n");
+			TS_CACHE_FOREACH(&ptpInterface->ts_cache, slot) {
+				struct sfptpd_ts_pkt *pkt = &ptpInterface->ts_cache.packet[slot];
+				dump("expected", pkt->match.pdu.data, pkt->match.pdu.len);
+			}
+			dump("got (with headers)", msg->msg_iov[0].iov_base, length);
 		}
-	}
-
-	if (!haveTs && matchedPkt)
-		WARNING("received looped back transmit "
-			"packet but no timestamp\n");
-
-	if (havePkt && !matchedPkt) {
-		WARNING("unexpected pkt received on "
-			"socket error queue. Expected one of:\n");
-		TS_CACHE_FOREACH(&ptpInterface->ts_cache, slot) {
-			struct sfptpd_ts_pkt *pkt = &ptpInterface->ts_cache.packet[slot];
-			dump("expected", pkt->match.pdu.data, pkt->match.pdu.len);
-		}
-		dump("got (with headers)", msg->msg_iov[0].iov_base, length);
 	}
 
 finish:
-	if (matchedPkt) {
-		struct sfptpd_ts_cache *cache = &ptpInterface->ts_cache;
-		int quantile;
-
-		/* Record time taken to get the result */
-		sfptpd_time_subtract(&elapsed, &now, &pkt->sent_monotime);
-
-		for (quantile = 0; quantile < TS_QUANTILES; quantile++) {
-			if (!sfptpd_time_is_greater_or_equal(&elapsed, &cache->stats_periodic.quantile_bounds[quantile])) {
-				cache->stats_periodic.resolved_quantile[quantile]++;
-				cache->stats_adhoc.resolved_quantile[quantile]++;
-				break;
-			}
-		}
-
-		DBGV("Tx timestamp took " SFPTPD_FMT_SFTIMESPEC "s to acquire\n",
-		     SFPTPD_ARGS_SFTIMESPEC(elapsed));
-	} else {
-		*ticket = TS_NULL_TICKET;
-	}
-
 	return haveTs;
 }
 
@@ -1311,10 +1344,11 @@ static Boolean getRxTimestamp(PtpInterface *ptpInterface,
 			info->have_sw = true;
 			break;
 
-		case SO_TIMESTAMPING:
+		case SCM_TIMESTAMPING_NEW:
+		case SCM_TIMESTAMPING_OLD:
 			parse_timestamp(CMSG_DATA(cmsg), cmsg->cmsg_len,
 					ptpInterface->ts_fmt,
-					info, FALSE);
+					info, FALSE, cmsg->cmsg_type);
 			break;
 
 		case SCM_TIMESTAMPING_PKTINFO:
@@ -1339,7 +1373,8 @@ static Boolean getRxTimestamp(PtpInterface *ptpInterface,
 
 /* Attempt to use SO_TIMESTAMPING with the provided flags, and try to include
  * SOF_TIMESTAMPING_OPT_PKTINFO if possible. */
-static Boolean netTryEnableTimestampingPktinfo(PtpInterface *ptpInterface, int flags)
+static Boolean netTryEnableTimestampingPktinfo(PtpInterface *ptpInterface,
+					       int flags, int type)
 {
 	int has_pktinfo_flag;
 
@@ -1360,6 +1395,22 @@ static Boolean netTryEnableTimestampingPktinfo(PtpInterface *ptpInterface, int f
 	return FALSE;
 }
 
+/* y2038: attempt SO_TIMESTAMPING_NEW, falling back to SO_TIMESTAMPING_OLD,
+ * allowing 32-bit systems to access 64-bit seconds on recent kernels. */
+static bool netTryEnableTimestamping(PtpInterface *ptpInterface, int flags)
+{
+	const int option[] = {
+		SO_TIMESTAMPING_NEW,
+		SO_TIMESTAMPING_OLD,
+	};
+	enum { FIRST, LAST } iter;
+	bool done = false;
+
+	for (iter = FIRST; !done && iter <= LAST; iter++)
+		done = netTryEnableTimestampingPktinfo(ptpInterface, flags, option[iter]);
+
+	return done;
+}
 
 /**
  * Initialize timestamping of packets
@@ -1403,7 +1454,7 @@ netInitTimestamping(PtpInterface *ptpInterface, InterfaceOpts *ifOpts)
 		      | SOF_TIMESTAMPING_RX_SOFTWARE
 		      | SOF_TIMESTAMPING_SOFTWARE;
 
-		if (netTryEnableTimestampingPktinfo(ptpInterface, flags)) {
+		if (netTryEnableTimestamping(ptpInterface, flags)) {
 			ptpInterface->tsMethod = TS_METHOD_SO_TIMESTAMPING;
 			INFO("using SO_TIMESTAMPING software timestamps\n");
 			return TRUE;
@@ -1480,7 +1531,7 @@ netInitTimestamping(PtpInterface *ptpInterface, InterfaceOpts *ifOpts)
 	      | SOF_TIMESTAMPING_RX_HARDWARE
 	      | SOF_TIMESTAMPING_RAW_HARDWARE;
 
-	if (netTryEnableTimestampingPktinfo(ptpInterface, flags)) {
+	if (netTryEnableTimestamping(ptpInterface, flags)) {
 		ptpInterface->tsMethod = TS_METHOD_SO_TIMESTAMPING;
 		INFO("using SO_TIMESTAMPING hardware timestamps\n");
 		return TRUE;
