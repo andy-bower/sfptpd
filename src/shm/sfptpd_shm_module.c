@@ -50,6 +50,12 @@
 
 #define SHM_CLOCK_STEP_THRESHOLD (500000000.0)
 
+enum shm_source_type {
+	SHM_SOURCE_COMPLETE,
+	SHM_SOURCE_TOD,
+	SHM_SOURCE_PPS,
+};
+
 enum shm_stats_ids {
 	SHM_STATS_ID_OFFSET,
 	SHM_STATS_ID_PERIOD,
@@ -109,6 +115,9 @@ struct sfptpd_shm_instance {
 
 	/* SHM alarms */
 	sfptpd_sync_module_alarms_t alarms;
+
+	/* What sort of source this is */
+	enum shm_source_type source_type;
 
 	/* Monotonic time of last SHM event */
 	struct sfptpd_timespec last_shm_time;
@@ -373,6 +382,27 @@ static int parse_master_time_source(struct sfptpd_config_section *section, const
 }
 
 
+static int parse_shm_source_type(struct sfptpd_config_section *section, const char *option,
+				 unsigned int num_params, const char * const params[])
+{
+	int rc = 0;
+	sfptpd_shm_module_config_t *shm = (sfptpd_shm_module_config_t *)section;
+	assert(num_params == 1);
+
+	if (strcmp(params[0], "complete") == 0) {
+		shm->source_type = SHM_SOURCE_COMPLETE;
+	} else if (strcmp(params[0], "tod") == 0) {
+		shm->source_type = SHM_SOURCE_TOD;
+	} else if (strcmp(params[0], "pps") == 0) {
+		shm->source_type = SHM_SOURCE_PPS;
+	} else {
+		rc = EINVAL;
+	}
+
+	return rc;
+}
+
+
 static int parse_master_accuracy(struct sfptpd_config_section *section, const char *option,
 				 unsigned int num_params, const char * const params[])
 {
@@ -572,10 +602,11 @@ static int parse_fir_filter_size(struct sfptpd_config_section *section, const ch
 
 static const sfptpd_config_option_t shm_config_options[] =
 {
-	{"segment", "<SHMID>",
-		"Specifies the shm ID, e.g. \"NTP0\" or 0x4e545030",
+	{"segment", "name|key <IDENTIFIER>",
+		"Specifies the shm key by name, e.g. \"NTP0\" or numberm, "
+		"\"0x4e545030\"",
 		1, SFPTPD_CONFIG_SCOPE_INSTANCE,
-		parse_interface},
+		parse_segment},
 	{"priority", "<NUMBER>",
 		"Relative priority of sync module instance. Smaller values have higher "
 		"priority. The default " STRINGIFY(SFPTPD_DEFAULT_PRIORITY) ".",
@@ -588,9 +619,13 @@ static const sfptpd_config_option_t shm_config_options[] =
 		STRINGIFY(SFPTPD_STATS_CONVERGENCE_MAX_OFFSET_DEFAULT) ".",
 		1, SFPTPD_CONFIG_SCOPE_INSTANCE,
 		parse_sync_threshold},
+	{"shm_source_type", "<complete | tod | pps>",
+		"Master clock class. Default value for SHM is complete.",
+		1, SFPTPD_CONFIG_SCOPE_INSTANCE,
+		parse_shm_source_type},
 	{"time_of_day", "<SYNC-INSTANCE>",
-		"Sync instance to use for the time-of-day source. If specified, "
-		"then this source is treated like a PPS source. NOT IMPLEMENTED.",
+		"Sync instance to use for the time-of-day source if this is a "
+		"PPS source.",
 		1, SFPTPD_CONFIG_SCOPE_INSTANCE,
 		parse_time_of_day},
 	{"master_clock_class", "<locked | holdover | freerunning>",
@@ -660,7 +695,6 @@ static const sfptpd_config_option_t shm_config_options[] =
 		"Default is " STRINGIFY(SFPTPD_SHM_DEFAULT_FIR_FILTER_SIZE) ".",
 		1, SFPTPD_CONFIG_SCOPE_INSTANCE,
 		parse_fir_filter_size},
-
 };
 
 static const sfptpd_config_option_set_t shm_config_option_set =
@@ -694,28 +728,6 @@ const char *shm_state_text(sfptpd_sync_module_state_t state, unsigned int alarms
 		return "shm-slave-alarm";
 
 	return states_text[state];
-}
-
-
-static int shm_test_mode_bogus_event(shm_module_t *shm,
-				     struct sfptpd_shm_instance *instance,
-				     unsigned int *seq_num,
-				     struct sfptpd_timespec *time)
-{
-	assert(shm != NULL);
-	assert(seq_num != NULL);
-	assert(time != NULL);
-	assert(instance->test.bogus_shm_events);
-
-	if ((rand() & 0xf) == 0) {
-		*seq_num = 12345678;
-		*time = instance->shm_timestamp;
-		time->nsec += ((rand() * rand()) % 1000000000);
-		sfptpd_time_normalise(time);
-		return 0;
-	}
-
-	return EAGAIN;
 }
 
 
@@ -2461,6 +2473,7 @@ static struct sfptpd_config_section *shm_config_create(const char *name,
 		/* Set default values for SHM configuration */
 		new->interface_name[0] = '\0';
 		new->priority = SFPTPD_DEFAULT_PRIORITY;
+		new->source_type = SHM_SOURCE_COMPLETE;
 		new->convergence_threshold = 0.0;
 		new->master_clock_class = SFPTPD_SHM_DEFAULT_CLOCK_CLASS;
 		new->master_time_source = SFPTPD_SHM_DEFAULT_TIME_SOURCE;

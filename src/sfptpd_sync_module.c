@@ -69,6 +69,8 @@ static const struct sync_module_defn sync_module_defns[] = {
 	[SFPTPD_CONFIG_CATEGORY_GPS]
 		= {SFPTPD_GPS_MODULE_NAME, sfptpd_gps_module_create},
 #endif
+	[SFPTPD_CONFIG_CATEGORY_SHM]
+		= {SFPTPD_SHM_MODULE_NAME, sfptpd_shm_module_create},
 };
 
 

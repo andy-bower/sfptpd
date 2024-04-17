@@ -10,9 +10,8 @@ SFPTPD_VERSION = $(shell scripts/sfptpd_versioning read)
 PACKAGE_NAME = sfptpd
 PACKAGE_VERSION = $(SFPTPD_VERSION)
 
-### Exclude unsupported features by default
-# The GPS module is not supported; use 'make NO_GPS=' to enable build
-NO_GPS = 1
+### Optional features. Uncomment to disable
+#NO_GPS = 1
 #NO_ONLOAD = 1
 
 ### Base definitions

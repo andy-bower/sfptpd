@@ -461,6 +461,7 @@ enum sfptpd_config_category {
 #ifdef HAVE_GPS
 	SFPTPD_CONFIG_CATEGORY_GPS,
 #endif
+	SFPTPD_CONFIG_CATEGORY_SHM,
 
 	/* Insert new categories here */
 
